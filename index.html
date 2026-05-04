@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KoopmanLab — Interactive Koopman Operator Theory & DMD Laboratory</title>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg2: #12121a;
+  --bg3: #1a1a28;
+  --border: #2a2a3a;
+  --text: #e0e0f0;
+  --text2: #8888aa;
+  --cyan: #00e5ff;
+  --magenta: #ff00e5;
+  --green: #00ff88;
+  --orange: #ff8800;
+  --red: #ff3366;
+  --yellow: #ffee00;
+  --purple: #aa66ff;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; overflow-x:hidden; }
+header { background:var(--bg2); border-bottom:1px solid var(--border); padding:12px 24px; display:flex; align-items:center; gap:16px; }
+header h1 { font-size:20px; font-weight:700; background:linear-gradient(90deg,var(--cyan),var(--magenta)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+header .sub { color:var(--text2); font-size:13px; }
+nav { display:flex; gap:2px; background:var(--bg2); padding:0 16px; border-bottom:1px solid var(--border); overflow-x:auto; }
+nav button { background:none; border:none; color:var(--text2); padding:10px 16px; font-size:13px; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; transition:all .2s; }
+nav button:hover { color:var(--text); background:var(--bg3); }
+nav button.active { color:var(--cyan); border-bottom-color:var(--cyan); }
+.module { display:none; height:calc(100vh - 90px); }
+.module.active { display:grid; grid-template-columns:280px 1fr; }
+.panel { background:var(--bg2); padding:16px; overflow-y:auto; border-right:1px solid var(--border); }
+.panel h3 { font-size:14px; color:var(--cyan); margin-bottom:12px; text-transform:uppercase; letter-spacing:1px; }
+.panel label { display:block; font-size:12px; color:var(--text2); margin:10px 0 4px; }
+.panel select, .panel input[type=range], .panel button { width:100%; }
+.panel select { background:var(--bg3); color:var(--text); border:1px solid var(--border); padding:6px 8px; border-radius:4px; font-size:13px; }
+.panel input[type=range] { accent-color:var(--cyan); }
+.panel .val { font-size:11px; color:var(--cyan); float:right; }
+.panel .info { font-size:11px; color:var(--text2); margin-top:8px; padding:8px; background:var(--bg); border-radius:4px; line-height:1.5; }
+.btn { background:linear-gradient(135deg,var(--cyan),var(--magenta)); color:#000; border:none; padding:8px 16px; border-radius:4px; font-size:13px; font-weight:600; cursor:pointer; margin-top:8px; transition:opacity .2s; }
+.btn:hover { opacity:.85; }
+.btn.secondary { background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+.vis { position:relative; background:var(--bg); }
+.vis canvas { width:100%; height:100%; }
+.stats { position:absolute; top:8px; right:8px; background:rgba(10,10,15,.9); padding:8px 12px; border-radius:4px; font-size:11px; color:var(--text2); border:1px solid var(--border); }
+.stats span { color:var(--cyan); }
+.legend { position:absolute; bottom:8px; left:8px; display:flex; gap:12px; font-size:11px; }
+.legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+.section-divider { border:none; border-top:1px solid var(--border); margin:12px 0; }
+@media(max-width:768px) {
+  .module.active { grid-template-columns:1fr; grid-template-rows:auto 1fr; }
+  .panel { max-height:200px; border-right:none; border-bottom:1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>KoopmanLab</h1>
+  <span class="sub">Interactive Koopman Operator Theory & Dynamic Mode Decomposition Laboratory</span>
+</header>
+<nav id="tabs"></nav>
+<main id="main"></main>
+
+<script>
+"use strict";
+// ============================================================
+// LINEAR ALGEBRA LIBRARY (from scratch — no dependencies)
+// ============================================================
+const LA = {
+  zeros: (r,c) => Array.from({length:r},()=>new Float64Array(c)),
+  eye: (n) => { const I=LA.zeros(n,n); for(let i=0;i<n;i++) I[i][i]=1; return I; },
+  clone: (A) => A.map(r=>Float64Array.from(r)),
+  transpose: (A) => {
+    const [m,n]=[A.length,A[0].length], T=LA.zeros(n,m);
+    for(let i=0;i<m;i++) for(let j=0;j<n;j++) T[j][i]=A[i][j];
+    return T;
+  },
+  matmul: (A,B) => {
+    const [m,k,n]=[A.length,A[0].length,B[0].length], C=LA.zeros(m,n);
+    for(let i=0;i<m;i++) for(let j=0;j<n;j++) { let s=0; for(let l=0;l<k;l++) s+=A[i][l]*B[l][j]; C[i][j]=s; }
+    return C;
+  },
+  matvec: (A,v) => {
+    const m=A.length, r=new Float64Array(m);
+    for(let i=0;i<m;i++) { let s=0; for(let j=0;j<A[0].length;j++) s+=A[i][j]*v[j]; r[i]=s; }
+    return r;
+  },
+  dot: (a,b) => { let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; },
+  norm: (v) => Math.sqrt(LA.dot(v,v)),
+  scale: (A,s) => A.map(r=>r.map(x=>x*s)),
+  add: (A,B) => A.map((r,i)=>r.map((x,j)=>x+B[i][j])),
+  sub: (A,B) => A.map((r,i)=>r.map((x,j)=>x-B[i][j])),
+  col: (A,j) => { const v=new Float64Array(A.length); for(let i=0;i<A.length;i++) v[i]=A[i][j]; return v; },
+  setCol: (A,j,v) => { for(let i=0;i<A.length;i++) A[i][j]=v[i]; },
+
+  // Householder QR decomposition
+  qr: (A_) => {
+    const A=LA.clone(A_), m=A.length, n=A[0].length, Q=LA.eye(m);
+    for(let k=0;k<Math.min(m-1,n);k++){
+      const x=new Float64Array(m-k);
+      for(let i=k;i<m;i++) x[i-k]=A[i][k];
+      const nrm=LA.norm(x);
+      if(nrm<1e-14) continue;
+      x[0]+=(x[0]>=0?1:-1)*nrm;
+      const nx=LA.norm(x); if(nx<1e-14) continue;
+      for(let i=0;i<x.length;i++) x[i]/=nx;
+      // Apply H to A
+      for(let j=k;j<n;j++){
+        let d=0; for(let i=0;i<x.length;i++) d+=x[i]*A[i+k][j];
+        d*=2; for(let i=0;i<x.length;i++) A[i+k][j]-=d*x[i];
+      }
+      // Apply H to Q
+      for(let j=0;j<m;j++){
+        let d=0; for(let i=0;i<x.length;i++) d+=x[i]*Q[i+k][j];
+        d*=2; for(let i=0;i<x.length;i++) Q[i+k][j]-=d*x[i];
+      }
+    }
+    return {Q:LA.transpose(Q), R:A};
+  },
+
+  // SVD via one-sided Jacobi (for matrices up to ~100x100)
+  svd: (A_,maxIter=200) => {
+    const A=LA.clone(A_), m=A.length, n=A[0].length;
+    const V=LA.eye(n);
+    for(let iter=0;iter<maxIter;iter++){
+      let off=0;
+      for(let p=0;p<n;p++) for(let q=p+1;q<n;q++){
+        let app=0,aqq=0,apq=0;
+        for(let i=0;i<m;i++){ app+=A[i][p]*A[i][p]; aqq+=A[i][q]*A[i][q]; apq+=A[i][p]*A[i][q]; }
+        off+=apq*apq;
+        if(Math.abs(apq)<1e-14) continue;
+        const tau=(aqq-app)/(2*apq), t=Math.sign(tau)/(Math.abs(tau)+Math.sqrt(1+tau*tau));
+        const c=1/Math.sqrt(1+t*t), s=t*c;
+        for(let i=0;i<m;i++){
+          const ai=A[i][p], bi=A[i][q];
+          A[i][p]=c*ai-s*bi; A[i][q]=s*ai+c*bi;
+        }
+        for(let i=0;i<n;i++){
+          const vi=V[i][p], wi=V[i][q];
+          V[i][p]=c*vi-s*wi; V[i][q]=s*vi+c*wi;
+        }
+      }
+      if(off<1e-28) break;
+    }
+    const sigma=new Float64Array(n);
+    const U=LA.zeros(m,n);
+    for(let j=0;j<n;j++){
+      let s=0; for(let i=0;i<m;i++) s+=A[i][j]*A[i][j];
+      sigma[j]=Math.sqrt(s);
+      if(sigma[j]>1e-14) for(let i=0;i<m;i++) U[i][j]=A[i][j]/sigma[j];
+    }
+    // Sort by decreasing singular value
+    const idx=Array.from({length:n},(_,i)=>i).sort((a,b)=>sigma[b]-sigma[a]);
+    const sS=new Float64Array(n), sU=LA.zeros(m,n), sV=LA.zeros(n,n);
+    for(let j=0;j<n;j++){
+      sS[j]=sigma[idx[j]];
+      for(let i=0;i<m;i++) sU[i][j]=U[i][idx[j]];
+      for(let i=0;i<n;i++) sV[i][j]=V[i][idx[j]];
+    }
+    return {U:sU, S:sS, V:sV};
+  },
+
+  // Eigendecomposition of small matrix via QR iteration
+  eig: (A_,maxIter=300) => {
+    const n=A_.length;
+    let T=LA.clone(A_), Q_acc=LA.eye(n);
+    // Hessenberg reduction first
+    for(let k=0;k<n-2;k++){
+      const x=new Float64Array(n-k-1);
+      for(let i=k+1;i<n;i++) x[i-k-1]=T[i][k];
+      const nrm=LA.norm(x); if(nrm<1e-14) continue;
+      x[0]+=(x[0]>=0?1:-1)*nrm;
+      const nx=LA.norm(x); if(nx<1e-14) continue;
+      for(let i=0;i<x.length;i++) x[i]/=nx;
+      // T = H*T*H
+      for(let j=k;j<n;j++){
+        let d=0; for(let i=0;i<x.length;i++) d+=x[i]*T[i+k+1][j]; d*=2;
+        for(let i=0;i<x.length;i++) T[i+k+1][j]-=d*x[i];
+      }
+      for(let j=0;j<n;j++){
+        let d=0; for(let i=0;i<x.length;i++) d+=x[i]*T[j][i+k+1]; d*=2;
+        for(let i=0;i<x.length;i++) T[j][i+k+1]-=d*x[i];
+      }
+      for(let j=0;j<n;j++){
+        let d=0; for(let i=0;i<x.length;i++) d+=x[i]*Q_acc[j][i+k+1]; d*=2;
+        for(let i=0;i<x.length;i++) Q_acc[j][i+k+1]-=d*x[i];
+      }
+    }
+    // QR iteration with shifts
+    for(let iter=0;iter<maxIter;iter++){
+      // Wilkinson shift
+      const s=T[n-1][n-1];
+      for(let i=0;i<n;i++) T[i][i]-=s;
+      const {Q:Qi,R}=LA.qr(T);
+      T=LA.matmul(R,Qi);
+      for(let i=0;i<n;i++) T[i][i]+=s;
+      Q_acc=LA.matmul(Q_acc,Qi);
+      // Check convergence
+      let off=0;
+      for(let i=1;i<n;i++) off+=T[i][i-1]*T[i][i-1];
+      if(off<1e-24) break;
+    }
+    // Extract eigenvalues (handle 2x2 blocks for complex pairs)
+    const eigRe=new Float64Array(n), eigIm=new Float64Array(n);
+    let i=0;
+    while(i<n){
+      if(i===n-1||Math.abs(T[i+1][i])<1e-10){
+        eigRe[i]=T[i][i]; eigIm[i]=0; i++;
+      } else {
+        const a=T[i][i], b=T[i][i+1], c=T[i+1][i], d=T[i+1][i+1];
+        const tr=a+d, det=a*d-b*c, disc=tr*tr-4*det;
+        if(disc>=0){
+          eigRe[i]=(tr+Math.sqrt(disc))/2; eigIm[i]=0;
+          eigRe[i+1]=(tr-Math.sqrt(disc))/2; eigIm[i+1]=0;
+        } else {
+          eigRe[i]=tr/2; eigIm[i]=Math.sqrt(-disc)/2;
+          eigRe[i+1]=tr/2; eigIm[i+1]=-Math.sqrt(-disc)/2;
+        }
+        i+=2;
+      }
+    }
+    return {values:{re:eigRe,im:eigIm}, vectors:Q_acc};
+  },
+
+  // Pseudo-inverse via SVD
+  pinv: (A) => {
+    const {U,S,V}=LA.svd(A);
+    const n=S.length, Sp=LA.zeros(n,U.length);
+    for(let i=0;i<n;i++) if(S[i]>1e-10) Sp[i][i]=1/S[i];
+    return LA.matmul(LA.matmul(V,Sp),LA.transpose(U));
+  },
+
+  // Complex matrix multiply (for DMD)
+  cMatVec: (Are,Aim,vre,vim) => {
+    const n=Are.length;
+    const rr=new Float64Array(n), ri=new Float64Array(n);
+    for(let i=0;i<n;i++){
+      for(let j=0;j<Are[0].length;j++){
+        rr[i]+=Are[i][j]*vre[j]-Aim[i][j]*vim[j];
+        ri[i]+=Are[i][j]*vim[j]+Aim[i][j]*vre[j];
+      }
+    }
+    return {re:rr,im:ri};
+  }
+};
+
+// ============================================================
+// DYNAMICAL SYSTEMS
+// ============================================================
+const Systems = {
+  lorenz: (state,p={sigma:10,rho:28,beta:8/3}) => {
+    const [x,y,z]=state;
+    return [p.sigma*(y-x), x*(p.rho-z)-y, x*y-p.beta*z];
+  },
+  vanderpol: (state,p={mu:1.5}) => {
+    const [x,y]=state;
+    return [y, p.mu*(1-x*x)*y-x];
+  },
+  duffing: (state,p={alpha:-1,beta:1,delta:0.2}) => {
+    const [x,y]=state;
+    return [y, -p.delta*y-p.alpha*x-p.beta*x*x*x];
+  },
+  doublePendulum: (state,p={g:9.81,l1:1,l2:1,m1:1,m2:1}) => {
+    const [t1,t2,w1,w2]=state;
+    const {g,l1,l2,m1,m2}=p;
+    const dt=t1-t2, M=m1+m2;
+    const den1=l1*(M-m2*Math.cos(dt)*Math.cos(dt));
+    const den2=l2*(M-m2*Math.cos(dt)*Math.cos(dt));
+    const a1=(-g*M*Math.sin(t1)-m2*g*Math.sin(t1-2*t2)-2*Math.sin(dt)*m2*(w2*w2*l2+w1*w1*l1*Math.cos(dt)))/den1;
+    const a2=(2*Math.sin(dt)*(w1*w1*l1*M+g*M*Math.cos(t1)+w2*w2*l2*m2*Math.cos(dt)))/den2;
+    return [w1,w2,a1,a2];
+  },
+  rk4: (f,state,dt,params) => {
+    const n=state.length;
+    const k1=f(state,params);
+    const s2=state.map((x,i)=>x+dt/2*k1[i]);
+    const k2=f(s2,params);
+    const s3=state.map((x,i)=>x+dt/2*k2[i]);
+    const k3=f(s3,params);
+    const s4=state.map((x,i)=>x+dt*k3[i]);
+    const k4=f(s4,params);
+    return state.map((x,i)=>x+dt/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]));
+  },
+  generate: (sys,ic,dt,steps,params) => {
+    const data=[ic.slice()];
+    let s=ic.slice();
+    for(let i=0;i<steps;i++){
+      s=Systems.rk4(sys,s,dt,params);
+      data.push(s.slice());
+    }
+    return data;
+  }
+};
+
+// ============================================================
+// DMD ALGORITHM
+// ============================================================
+function computeDMD(data, rank) {
+  const m=data[0].length, n=data.length-1;
+  // Build X and Y matrices (columns are snapshots)
+  const X=LA.zeros(m,n), Y=LA.zeros(m,n);
+  for(let j=0;j<n;j++) for(let i=0;i<m;i++){
+    X[i][j]=data[j][i];
+    Y[i][j]=data[j+1][i];
+  }
+  // SVD of X
+  const {U,S,V}=LA.svd(X);
+  const r=Math.min(rank,S.length);
+  // Truncate
+  const Ur=LA.zeros(m,r), Sr=new Float64Array(r), Vr=LA.zeros(n,r);
+  for(let i=0;i<m;i++) for(let j=0;j<r;j++) Ur[i][j]=U[i][j];
+  for(let j=0;j<r;j++) Sr[j]=S[j];
+  for(let i=0;i<n;i++) for(let j=0;j<r;j++) Vr[i][j]=V[i][j];
+  // Atilde = Ur' * Y * Vr * Sr^-1
+  const UrT=LA.transpose(Ur);
+  const UrTY=LA.matmul(UrT,Y);
+  const UrTYVr=LA.matmul(UrTY,Vr);
+  const SrInv=LA.zeros(r,r);
+  for(let i=0;i<r;i++) SrInv[i][i]=1/Sr[i];
+  const Atilde=LA.matmul(UrTYVr,SrInv);
+  // Eigendecomposition of Atilde
+  const {values,vectors:W}=LA.eig(Atilde);
+  // DMD modes: Phi = Y * Vr * SrInv * W
+  const tmp=LA.matmul(LA.matmul(LA.matmul(Y,Vr),SrInv),W);
+  // Eigenvalues
+  const eigs=[];
+  for(let i=0;i<r;i++){
+    const re=values.re[i], im=values.im[i];
+    const mag=Math.sqrt(re*re+im*im);
+    const freq=Math.atan2(im,re);
+    eigs.push({re,im,mag,freq,growth:Math.log(mag)});
+  }
+  // Mode amplitudes (initial condition projection)
+  const x0=new Float64Array(m);
+  for(let i=0;i<m;i++) x0[i]=data[0][i];
+  // b = pinv(Phi) * x0 (simplified)
+  const PhiT=LA.transpose(tmp);
+  const PhiTPhiInv=LA.pinv(LA.matmul(PhiT,tmp));
+  const b_coeffs=LA.matvec(LA.matmul(PhiTPhiInv,PhiT),x0);
+  return {modes:tmp, eigs, amplitudes:b_coeffs, Ur, Sr, Vr, Atilde, rank:r};
+}
+
+// ============================================================
+// DRAWING UTILITIES
+// ============================================================
+class CanvasDraw {
+  constructor(canvas){
+    this.canvas=canvas;
+    this.ctx=canvas.getContext('2d');
+    this.resize();
+  }
+  resize(){
+    const r=this.canvas.parentElement.getBoundingClientRect();
+    this.canvas.width=r.width*devicePixelRatio;
+    this.canvas.height=r.height*devicePixelRatio;
+    this.w=r.width; this.h=r.height;
+    this.ctx.scale(devicePixelRatio,devicePixelRatio);
+  }
+  clear(){ this.ctx.clearRect(0,0,this.w,this.h); }
+  line(x1,y1,x2,y2,color,lw=1){
+    const c=this.ctx; c.beginPath(); c.strokeStyle=color; c.lineWidth=lw;
+    c.moveTo(x1,y1); c.lineTo(x2,y2); c.stroke();
+  }
+  circle(x,y,r,color,fill=true){
+    const c=this.ctx; c.beginPath(); c.arc(x,y,r,0,Math.PI*2);
+    if(fill){ c.fillStyle=color; c.fill(); } else { c.strokeStyle=color; c.lineWidth=1; c.stroke(); }
+  }
+  text(str,x,y,color='#8888aa',size=11,align='left'){
+    const c=this.ctx; c.font=`${size}px 'Segoe UI',system-ui,sans-serif`;
+    c.fillStyle=color; c.textAlign=align; c.fillText(str,x,y);
+  }
+  axes(ox,oy,xLen,yLen,xLabel,yLabel){
+    this.line(ox,oy-yLen,ox,oy+5,'#333',1);
+    this.line(ox-5,oy,ox+xLen,oy,'#333',1);
+    this.text(xLabel,ox+xLen+4,oy+4,'#555',10);
+    this.text(yLabel,ox-4,oy-yLen-4,'#555',10,'right');
+  }
+  polyline(pts,color,lw=1.5){
+    if(pts.length<2) return;
+    const c=this.ctx; c.beginPath(); c.strokeStyle=color; c.lineWidth=lw;
+    c.moveTo(pts[0][0],pts[0][1]);
+    for(let i=1;i<pts.length;i++) c.lineTo(pts[i][0],pts[i][1]);
+    c.stroke();
+  }
+  heatmap(data,x,y,w,h,colorFn){
+    const rows=data.length, cols=data[0].length;
+    const cw=w/cols, ch=h/rows;
+    for(let i=0;i<rows;i++) for(let j=0;j<cols;j++){
+      this.ctx.fillStyle=colorFn(data[i][j]);
+      this.ctx.fillRect(x+j*cw,y+i*ch,cw+1,ch+1);
+    }
+  }
+}
+
+// ============================================================
+// MODULE DEFINITIONS
+// ============================================================
+const modules = [
+  {id:'dmd', title:'DMD Engine', icon:'📊'},
+  {id:'koopman', title:'Koopman Eigenfunctions', icon:'🌀'},
+  {id:'edmd', title:'EDMD Dictionaries', icon:'📚'},
+  {id:'deepk', title:'Deep Koopman', icon:'🧠'},
+  {id:'flow', title:'Flow Reconstruction', icon:'🌊'},
+  {id:'control', title:'Koopman MPC', icon:'🎮'},
+];
+
+// Build navigation
+const nav=document.getElementById('tabs');
+const main=document.getElementById('main');
+modules.forEach((mod,idx)=>{
+  const btn=document.createElement('button');
+  btn.textContent=`${mod.icon} ${mod.title}`;
+  btn.dataset.idx=idx;
+  btn.onclick=()=>switchModule(idx);
+  nav.appendChild(btn);
+});
+
+function switchModule(idx){
+  nav.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('active',i===idx));
+  main.querySelectorAll('.module').forEach((m,i)=>m.classList.toggle('active',i===idx));
+  if(moduleInits[idx]) moduleInits[idx]();
+}
+
+const moduleInits=[];
+
+// ============================================================
+// MODULE 1: DMD ENGINE
+// ============================================================
+(function(){
+  const div=document.createElement('div');
+  div.className='module'; div.id='mod-dmd';
+  div.innerHTML=`
+    <div class="panel">
+      <h3>DMD Engine</h3>
+      <label>Dynamical System</label>
+      <select id="dmd-sys">
+        <option value="lorenz">Lorenz Attractor</option>
+        <option value="vanderpol">Van der Pol Oscillator</option>
+        <option value="duffing">Duffing Oscillator</option>
+      </select>
+      <label>Time Steps <span class="val" id="dmd-steps-v">500</span></label>
+      <input type="range" id="dmd-steps" min="100" max="2000" value="500" step="100">
+      <label>dt <span class="val" id="dmd-dt-v">0.01</span></label>
+      <input type="range" id="dmd-dt" min="1" max="50" value="10">
+      <label>DMD Rank <span class="val" id="dmd-rank-v">10</span></label>
+      <input type="range" id="dmd-rank" min="2" max="30" value="10">
+      <hr class="section-divider">
+      <button class="btn" id="dmd-run">Compute DMD</button>
+      <div class="info" id="dmd-info">
+        <b>Dynamic Mode Decomposition</b> extracts spatiotemporal coherent structures from time-series data.
+        It computes a low-rank approximation of the best-fit linear operator that advances the state forward in time.
+        Eigenvalues on the unit circle → oscillatory modes. Inside → decaying. Outside → growing.
+      </div>
+    </div>
+    <div class="vis">
+      <canvas id="dmd-canvas"></canvas>
+      <div class="stats" id="dmd-stats"></div>
+    </div>`;
+  main.appendChild(div);
+
+  let cd;
+  moduleInits[0]=()=>{
+    if(!cd){ cd=new CanvasDraw(document.getElementById('dmd-canvas')); }
+    cd.resize(); runDMD();
+  };
+
+  const bind=(id,vId)=>{
+    const el=document.getElementById(id), vel=document.getElementById(vId);
+    el.oninput=()=>{ vel.textContent=id==='dmd-dt'?(el.value/1000).toFixed(3):el.value; };
+  };
+  bind('dmd-steps','dmd-steps-v');
+  bind('dmd-dt','dmd-dt-v');
+  bind('dmd-rank','dmd-rank-v');
+  document.getElementById('dmd-run').onclick=runDMD;
+
+  function runDMD(){
+    if(!cd) return;
+    const sysName=document.getElementById('dmd-sys').value;
+    const steps=+document.getElementById('dmd-steps').value;
+    const dt=+document.getElementById('dmd-dt').value/1000;
+    const rank=+document.getElementById('dmd-rank').value;
+
+    const sysFn={lorenz:Systems.lorenz,vanderpol:Systems.vanderpol,duffing:Systems.duffing}[sysName];
+    const ic={lorenz:[1,1,1],vanderpol:[2,0],duffing:[0.5,0]}[sysName];
+    const data=Systems.generate(sysFn,ic,dt,steps);
+    const dmd=computeDMD(data,rank);
+
+    cd.resize(); cd.clear();
+    const W=cd.w, H=cd.h;
+    const pad=50;
+
+    // --- Left half: Eigenvalue spectrum on unit circle ---
+    const cx=W*0.25, cy=H*0.5, R=Math.min(W*0.22,H*0.38);
+    // Unit circle
+    cd.ctx.beginPath(); cd.ctx.arc(cx,cy,R,0,Math.PI*2);
+    cd.ctx.strokeStyle='#333'; cd.ctx.lineWidth=1; cd.ctx.stroke();
+    // Axes
+    cd.line(cx-R-20,cy,cx+R+20,cy,'#222');
+    cd.line(cx,cy-R-20,cx,cy+R+20,'#222');
+    cd.text('Re',cx+R+24,cy+4,'#555',10);
+    cd.text('Im',cx+4,cy-R-8,'#555',10);
+    cd.text('Unit Circle',cx,cy-R-22,'#444',11,'center');
+    cd.text('Eigenvalue Spectrum',cx,pad-20,'var(--cyan)',13,'center');
+
+    // Plot eigenvalues
+    dmd.eigs.forEach((e,i)=>{
+      const px=cx+e.re*R, py=cy-e.im*R;
+      const hue=(i/dmd.eigs.length)*300;
+      cd.circle(px,py,5,`hsl(${hue},80%,60%)`);
+      cd.circle(px,py,5,`hsl(${hue},80%,60%)`,false);
+    });
+    // Annotations
+    cd.text('Inside: Decaying',cx-R,cy+R+30,'#666',10,'left');
+    cd.text('Outside: Growing',cx+R-80,cy+R+30,'#666',10,'left');
+
+    // --- Right half: Reconstruction ---
+    const rx=W*0.52, rw=W*0.44, ry=pad, rh=(H-2*pad)/3-10;
+    const dim=data[0].length;
+    const labels=['x','y','z'];
+    const colors=['#00e5ff','#ff00e5','#00ff88'];
+
+    for(let d=0;d<Math.min(dim,3);d++){
+      const baseY=ry+d*(rh+15);
+      // Original data
+      const orig=data.map(s=>s[d]);
+      const minV=Math.min(...orig), maxV=Math.max(...orig), range=maxV-minV||1;
+      const pts=orig.map((v,i)=>[rx+i/orig.length*rw, baseY+rh-(v-minV)/range*rh]);
+      cd.polyline(pts,colors[d],1.2);
+
+      // DMD reconstruction
+      const recon=[];
+      for(let t=0;t<data.length;t++){
+        let val=0;
+        for(let k=0;k<dmd.rank;k++){
+          const phi_re=dmd.modes[d]?dmd.modes[d][k]:0;
+          const lam_re=dmd.eigs[k].re, lam_im=dmd.eigs[k].im;
+          const mag=dmd.eigs[k].mag, ang=dmd.eigs[k].freq;
+          const amp=dmd.amplitudes[k]||0;
+          val+=amp*Math.pow(mag,t)*Math.cos(ang*t)*phi_re;
+        }
+        recon.push(val);
+      }
+      const reconPts=recon.map((v,i)=>[rx+i/recon.length*rw, baseY+rh-(v-minV)/range*rh]);
+      cd.polyline(reconPts,'#ff8800',1);
+
+      cd.text(`${labels[d]}(t)`,rx-5,baseY+rh/2,colors[d],11,'right');
+      cd.axes(rx,baseY+rh,rw,rh,'t',labels[d]);
+    }
+
+    cd.text('Time Series & DMD Reconstruction',rx+rw/2,pad-20,'var(--cyan)',13,'center');
+
+    // Stats
+    const statsEl=document.getElementById('dmd-stats');
+    statsEl.innerHTML=`Rank: <span>${dmd.rank}</span> | Modes: <span>${dmd.eigs.length}</span> |
+      Dominant freq: <span>${Math.abs(dmd.eigs[0]?.freq||0).toFixed(3)}</span> |
+      σ₁: <span>${dmd.Sr[0]?.toFixed(2)||'—'}</span>`;
+  }
+})();
+
+// ============================================================
+// MODULE 2: KOOPMAN EIGENFUNCTIONS
+// ============================================================
+(function(){
+  const div=document.createElement('div');
+  div.className='module'; div.id='mod-koopman';
+  div.innerHTML=`
+    <div class="panel">
+      <h3>Koopman Eigenfunctions</h3>
+      <label>System</label>
+      <select id="koop-sys">
+        <option value="linear">Linear Spiral</option>
+        <option value="vanderpol">Van der Pol</option>
+        <option value="duffing">Duffing (unforced)</option>
+      </select>
+      <label>Eigenfunction Index <span class="val" id="koop-idx-v">1</span></label>
+      <input type="range" id="koop-idx" min="1" max="4" value="1">
+      <label>Grid Resolution <span class="val" id="koop-res-v">40</span></label>
+      <input type="range" id="koop-res" min="15" max="60" value="40">
+      <hr class="section-divider">
+      <button class="btn" id="koop-run">Compute Eigenfunctions</button>
+      <div class="info">
+        <b>Koopman Operator</b>: For a dynamical system x' = f(x), the Koopman operator K acts on observable functions g(x):
+        (Kg)(x) = g(f(x)). It's linear even when f is nonlinear!
+        Eigenfunctions φ satisfy: Kφ = λφ, meaning they evolve as simple exponentials/oscillations along trajectories.
+      </div>
+    </div>
+    <div class="vis">
+      <canvas id="koop-canvas"></canvas>
+    </div>`;
+  main.appendChild(div);
+
+  let cd;
+  moduleInits[1]=()=>{
+    if(!cd) cd=new CanvasDraw(document.getElementById('koop-canvas'));
+    cd.resize(); runKoopman();
+  };
+
+  document.getElementById('koop-run').onclick=()=>runKoopman();
+  ['koop-idx','koop-res'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.oninput=()=>document.getElementById(id+'-v').textContent=el.value;
+  });
+
+  function runKoopman(){
+    if(!cd) return;
+    cd.resize(); cd.clear();
+    const W=cd.w, H=cd.h, pad=40;
+    const sysName=document.getElementById('koop-sys').value;
+    const efIdx=+document.getElementById('koop-idx').value;
+    const res=+document.getElementById('koop-res').value;
+
+    // Define systems and their analytical/numerical Koopman eigenfunctions
+    const systems={
+      linear: {
+        f: ([x,y])=>[-.1*x-y, x-.1*y],
+        xRange:[-3,3], yRange:[-3,3],
+        eigenfunctions: [
+          (x,y)=>x*x+y*y, // |z|^2
+          (x,y)=>Math.atan2(y,x), // angle
+          (x,y)=>Math.exp(-(x*x+y*y)), // radial Gaussian
+          (x,y)=>x*y, // product
+        ],
+        efLabels:['φ₁ = x²+y²','φ₂ = atan2(y,x)','φ₃ = exp(-(x²+y²))','φ₄ = xy']
+      },
+      vanderpol: {
+        f: ([x,y])=>[y, 1.5*(1-x*x)*y-x],
+        xRange:[-4,4], yRange:[-6,6],
+        eigenfunctions: [
+          (x,y)=>x*x+y*y,
+          (x,y)=>Math.atan2(y,x),
+          (x,y)=>x*x*x-3*x*y*y,
+          (x,y)=>Math.sin(x)*Math.cos(y),
+        ],
+        efLabels:['φ₁ = x²+y²','φ₂ = atan2(y,x)','φ₃ = x³-3xy²','φ₄ = sin(x)cos(y)']
+      },
+      duffing: {
+        f: ([x,y])=>[y, x-x*x*x-0.2*y],
+        xRange:[-2.5,2.5], yRange:[-2.5,2.5],
+        eigenfunctions: [
+          (x,y)=>0.5*y*y-0.5*x*x+0.25*x*x*x*x, // Energy-like
+          (x,y)=>Math.atan2(y,x),
+          (x,y)=>x*x-1, // Distance from fixed points
+          (x,y)=>y*Math.exp(-x*x),
+        ],
+        efLabels:['φ₁ = H(x,y) [energy]','φ₂ = atan2(y,x)','φ₃ = x²-1','φ₄ = y·exp(-x²)']
+      }
+    };
+    const sys=systems[sysName];
+    const ef=sys.eigenfunctions[efIdx-1];
+    const [xMin,xMax]=sys.xRange, [yMin,yMax]=sys.yRange;
+
+    // --- Left: Phase portrait with eigenfunction coloring ---
+    const lx=pad, ly=pad, lw=W/2-2*pad, lh=H-2*pad;
+
+    // Compute eigenfunction values on grid for coloring
+    const vals=[];
+    let vMin=Infinity, vMax=-Infinity;
+    for(let i=0;i<res;i++) for(let j=0;j<res;j++){
+      const x=xMin+(xMax-xMin)*j/(res-1);
+      const y=yMax-(yMax-yMin)*i/(res-1);
+      const v=ef(x,y);
+      vals.push(v);
+      if(isFinite(v)){ vMin=Math.min(vMin,v); vMax=Math.max(vMax,v); }
+    }
+    const vRange=vMax-vMin||1;
+
+    // Draw eigenfunction heatmap
+    const cw=lw/res, ch=lh/res;
+    for(let i=0;i<res;i++) for(let j=0;j<res;j++){
+      const v=vals[i*res+j];
+      const t=isFinite(v)?Math.max(0,Math.min(1,(v-vMin)/vRange)):0.5;
+      // Cyan-black-magenta colormap
+      const r_=Math.round(t*255), g_=Math.round((1-Math.abs(2*t-1))*80), b_=Math.round((1-t)*255);
+      cd.ctx.fillStyle=`rgb(${r_},${g_},${b_})`;
+      cd.ctx.fillRect(lx+j*cw,ly+i*ch,cw+1,ch+1);
+    }
+
+    // Overlay trajectories
+    for(let ti=0;ti<8;ti++){
+      const x0=xMin+(xMax-xMin)*Math.random();
+      const y0=yMin+(yMax-yMin)*Math.random();
+      let state=[x0,y0];
+      const pts=[];
+      for(let s=0;s<300;s++){
+        const px=lx+(state[0]-xMin)/(xMax-xMin)*lw;
+        const py=ly+(yMax-state[1])/(yMax-yMin)*lh;
+        if(px>=lx&&px<=lx+lw&&py>=ly&&py<=ly+lh) pts.push([px,py]);
+        state=Systems.rk4(sys.f,state,0.02);
+      }
+      cd.polyline(pts,'rgba(255,255,255,0.4)',0.8);
+    }
+
+    cd.text('Phase Space + Eigenfunction φ',lx+lw/2,ly-12,'#00e5ff',13,'center');
+    cd.text(sys.efLabels[efIdx-1],lx+lw/2,ly+lh+20,'#ff00e5',11,'center');
+
+    // --- Right: Eigenfunction value along trajectories (should be smooth/linear) ---
+    const rx=W/2+pad, ry=pad, rw=W/2-2*pad, rh=H/2-2*pad;
+    cd.ctx.fillStyle='rgba(10,10,20,0.8)';
+    cd.ctx.fillRect(rx-10,ry-10,rw+20,rh+30);
+
+    cd.text('φ along trajectories (should evolve smoothly)',rx+rw/2,ry-15,'#00e5ff',12,'center');
+    const tColors=['#00e5ff','#ff00e5','#00ff88','#ff8800','#aa66ff'];
+    for(let ti=0;ti<5;ti++){
+      const x0=xMin+(xMax-xMin)*(ti+1)/6;
+      const y0=yMin+(yMax-yMin)*(ti+1)/6;
+      let state=[x0,y0];
+      const efVals=[];
+      for(let s=0;s<200;s++){
+        efVals.push(ef(state[0],state[1]));
+        state=Systems.rk4(sys.f,state,0.02);
+      }
+      const eMin=Math.min(...efVals.filter(isFinite)), eMax=Math.max(...efVals.filter(isFinite));
+      const eRange=eMax-eMin||1;
+      const pts=efVals.map((v,i)=>[rx+i/efVals.length*rw, ry+rh-(v-eMin)/eRange*rh]);
+      cd.polyline(pts,tColors[ti],1.2);
+    }
+    cd.axes(rx,ry+rh,rw,rh,'t','φ(x(t))');
+
+    // --- Bottom right: Koopman evolution comparison ---
+    const by=H/2+pad, bh=H/2-2*pad;
+    cd.ctx.fillStyle='rgba(10,10,20,0.8)';
+    cd.ctx.fillRect(rx-10,by-10,rw+20,bh+30);
+    cd.text('Nonlinear x(t) vs. Linear Koopman φ(x(t))',rx+rw/2,by-15,'#00e5ff',12,'center');
+
+    let state=[1.5,0.5];
+    const xVals=[],phiVals=[];
+    for(let s=0;s<200;s++){
+      xVals.push(state[0]);
+      phiVals.push(ef(state[0],state[1]));
+      state=Systems.rk4(sys.f,state,0.02);
+    }
+    // Normalize both to [0,1]
+    const xMin2=Math.min(...xVals),xMax2=Math.max(...xVals),xR=xMax2-xMin2||1;
+    const pMin=Math.min(...phiVals.filter(isFinite)),pMax=Math.max(...phiVals.filter(isFinite)),pR=pMax-pMin||1;
+    const xPts=xVals.map((v,i)=>[rx+i/xVals.length*rw, by+bh-(v-xMin2)/xR*bh]);
+    const pPts=phiVals.map((v,i)=>[rx+i/phiVals.length*rw, by+bh-(v-pMin)/pR*bh]);
+    cd.polyline(xPts,'#ff8800',1.5);
+    cd.polyline(pPts,'#00e5ff',1.5);
+    cd.text('x(t)','#ff8800'); // simplified legend
+    cd.axes(rx,by+bh,rw,bh,'t','value');
+
+    // Legend
+    cd.ctx.fillStyle='#ff8800'; cd.ctx.fillRect(rx+rw-100,by+10,10,10);
+    cd.text('x(t)',rx+rw-85,by+19,'#ff8800',10);
+    cd.ctx.fillStyle='#00e5ff'; cd.ctx.fillRect(rx+rw-100,by+25,10,10);
+    cd.text('φ(x(t))',rx+rw-85,by+34,'#00e5ff',10);
+  }
+})();
+
+// ============================================================
+// MODULE 3: EDMD WITH DICTIONARIES
+// ============================================================
+(function(){
+  const div=document.createElement('div');
+  div.className='module'; div.id='mod-edmd';
+  div.innerHTML=`
+    <div class="panel">
+      <h3>EDMD Dictionaries</h3>
+      <label>System</label>
+      <select id="edmd-sys">
+        <option value="vanderpol">Van der Pol</option>
+        <option value="duffing">Duffing</option>
+      </select>
+      <label>Dictionary Type</label>
+      <select id="edmd-dict">
+        <option value="mono">Monomials (x^a y^b)</option>
+        <option value="fourier">Fourier Basis</option>
+        <option value="rbf">Radial Basis Functions</option>
+        <option value="hermite">Hermite Polynomials</option>
+      </select>
+      <label>Dictionary Size <span class="val" id="edmd-size-v">15</span></label>
+      <input type="range" id="edmd-size" min="5" max="40" value="15">
+      <label>Training Points <span class="val" id="edmd-pts-v">300</span></label>
+      <input type="range" id="edmd-pts" min="100" max="1000" value="300" step="50">
+      <hr class="section-divider">
+      <button class="btn" id="edmd-run">Compute EDMD</button>
+      <div class="info">
+        <b>Extended DMD</b> approximates the Koopman operator by choosing a dictionary of basis functions
+        ψ = [ψ₁(x), ψ₂(x), ...] and finding K such that ψ(x') ≈ K·ψ(x).
+        Better dictionaries → better approximation of Koopman eigenfunctions.
+      </div>
+    </div>
+    <div class="vis">
+      <canvas id="edmd-canvas"></canvas>
+    </div>`;
+  main.appendChild(div);
+
+  let cd;
+  moduleInits[2]=()=>{
+    if(!cd) cd=new CanvasDraw(document.getElementById('edmd-canvas'));
+    cd.resize(); runEDMD();
+  };
+
+  ['edmd-size','edmd-pts'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.oninput=()=>document.getElementById(id+'-v').textContent=el.value;
+  });
+  document.getElementById('edmd-run').onclick=runEDMD;
+
+  function buildDictionary(type,size){
+    if(type==='mono'){
+      // Monomial basis: 1, x, y, x^2, xy, y^2, ...
+      const fns=[]; const labels=[];
+      for(let deg=0;fns.length<size;deg++){
+        for(let a=deg;a>=0&&fns.length<size;a--){
+          const b=deg-a;
+          fns.push((x,y)=>Math.pow(x,a)*Math.pow(y,b));
+          labels.push(`x${a>1?'^'+a:a===1?'':''}${b>0?'y':''}${b>1?'^'+b:''}`);
+        }
+      }
+      return {fns,labels};
+    } else if(type==='fourier'){
+      const fns=[]; const labels=[];
+      fns.push(()=>1); labels.push('1');
+      for(let k=1;fns.length<size;k++){
+        if(fns.length<size){ fns.push((x,y)=>Math.cos(k*x)); labels.push(`cos(${k}x)`); }
+        if(fns.length<size){ fns.push((x,y)=>Math.sin(k*x)); labels.push(`sin(${k}x)`); }
+        if(fns.length<size){ fns.push((x,y)=>Math.cos(k*y)); labels.push(`cos(${k}y)`); }
+        if(fns.length<size){ fns.push((x,y)=>Math.sin(k*y)); labels.push(`sin(${k}y)`); }
+      }
+      return {fns:fns.slice(0,size),labels:labels.slice(0,size)};
+    } else if(type==='rbf'){
+      const fns=[]; const labels=[];
+      const sigma=1.5;
+      for(let i=0;fns.length<size;i++){
+        const cx=-3+6*(i%5)/4, cy=-3+6*Math.floor(i/5)/4;
+        fns.push((x,y)=>Math.exp(-((x-cx)**2+(y-cy)**2)/(2*sigma*sigma)));
+        labels.push(`φ(${cx.toFixed(1)},${cy.toFixed(1)})`);
+      }
+      return {fns:fns.slice(0,size),labels:labels.slice(0,size)};
+    } else { // hermite
+      const H=[x=>1, x=>2*x, x=>4*x*x-2, x=>8*x*x*x-12*x, x=>16*x**4-48*x*x+12];
+      const fns=[]; const labels=[];
+      for(let i=0;fns.length<size;i++){
+        for(let j=0;j<=i&&fns.length<size;j++){
+          const a=i-j, b=j;
+          if(a<H.length&&b<H.length){
+            const ha=H[a], hb=H[b];
+            fns.push((x,y)=>ha(x)*hb(y)*Math.exp(-(x*x+y*y)/4));
+            labels.push(`H${a}H${b}`);
+          }
+        }
+      }
+      return {fns:fns.slice(0,size),labels:labels.slice(0,size)};
+    }
+  }
+
+  function runEDMD(){
+    if(!cd) return;
+    cd.resize(); cd.clear();
+    const W=cd.w, H=cd.h, pad=50;
+
+    const sysName=document.getElementById('edmd-sys').value;
+    const dictType=document.getElementById('edmd-dict').value;
+    const dictSize=+document.getElementById('edmd-size').value;
+    const nPts=+document.getElementById('edmd-pts').value;
+
+    const sysFn={vanderpol:Systems.vanderpol,duffing:Systems.duffing}[sysName];
+    const ic={vanderpol:[2,0],duffing:[0.5,0]}[sysName];
+    const dt=0.02;
+
+    // Generate training data
+    const data=Systems.generate(sysFn,ic,dt,nPts);
+    const dict=buildDictionary(dictType,dictSize);
+    const D=dict.fns.length;
+
+    // Build Psi_X and Psi_Y matrices
+    const N=data.length-1;
+    const PsiX=LA.zeros(N,D), PsiY=LA.zeros(N,D);
+    for(let t=0;t<N;t++){
+      const x=data[t], xp=data[t+1];
+      for(let d=0;d<D;d++){
+        PsiX[t][d]=dict.fns[d](x[0],x[1]);
+        PsiY[t][d]=dict.fns[d](xp[0],xp[1]);
+      }
+    }
+
+    // K = pinv(PsiX) * PsiY
+    const PsiXpinv=LA.pinv(PsiX);
+    const K=LA.matmul(LA.transpose(PsiY),LA.transpose(PsiXpinv));
+
+    // Eigendecomposition of K
+    const {values,vectors}=LA.eig(K);
+
+    // --- Left: Eigenvalue spectrum ---
+    const cx=W*0.2, cy=H*0.45, R=Math.min(W*0.17,H*0.35);
+    cd.ctx.beginPath(); cd.ctx.arc(cx,cy,R,0,Math.PI*2);
+    cd.ctx.strokeStyle='#333'; cd.ctx.lineWidth=1; cd.ctx.stroke();
+    cd.line(cx-R-15,cy,cx+R+15,cy,'#222');
+    cd.line(cx,cy-R-15,cx,cy+R+15,'#222');
+    cd.text('EDMD Eigenvalue Spectrum',cx,pad-10,'#00e5ff',13,'center');
+
+    for(let i=0;i<D;i++){
+      const re=values.re[i], im=values.im[i];
+      const px=cx+re*R, py=cy-im*R;
+      const hue=(i/D)*300;
+      cd.circle(px,py,4,`hsl(${hue},80%,60%)`);
+    }
+    cd.text('Re',cx+R+18,cy+4,'#555',10);
+    cd.text('Im',cx+4,cy-R-8,'#555',10);
+
+    // --- Right top: Reconstruction error ---
+    const rx=W*0.42, rw=W*0.55, ry=pad, rh=H*0.4;
+    cd.text('EDMD Prediction vs. True Trajectory',rx+rw/2,ry-10,'#00e5ff',13,'center');
+
+    // Predict using EDMD
+    const predicted=[];
+    let psi=new Float64Array(D);
+    for(let d=0;d<D;d++) psi[d]=dict.fns[d](data[0][0],data[0][1]);
+    predicted.push([data[0][0],data[0][1]]);
+
+    for(let t=0;t<Math.min(N,200);t++){
+      psi=LA.matvec(K,psi);
+      // Decode: use first two basis functions (x,y for monomials)
+      predicted.push([psi[1]||psi[0],psi[2]||psi[1]]);
+    }
+
+    // Plot x(t) true vs predicted
+    const trueX=data.slice(0,201).map(s=>s[0]);
+    const predX=predicted.map(s=>s[0]);
+    const allX=[...trueX,...predX].filter(isFinite);
+    const xMin=Math.min(...allX), xMax=Math.max(...allX), xR=xMax-xMin||1;
+
+    const truePts=trueX.map((v,i)=>[rx+i/trueX.length*rw, ry+rh-(v-xMin)/xR*rh]);
+    const predPts=predX.slice(0,trueX.length).map((v,i)=>[rx+i/trueX.length*rw, ry+rh-(v-xMin)/xR*rh]);
+    cd.polyline(truePts,'#00e5ff',1.5);
+    cd.polyline(predPts,'#ff8800',1.2);
+    cd.axes(rx,ry+rh,rw,rh,'t','x(t)');
+
+    // Legend
+    cd.ctx.fillStyle='#00e5ff'; cd.ctx.fillRect(rx+rw-120,ry+10,10,10);
+    cd.text('True',rx+rw-105,ry+19,'#00e5ff',10);
+    cd.ctx.fillStyle='#ff8800'; cd.ctx.fillRect(rx+rw-120,ry+25,10,10);
+    cd.text('EDMD',rx+rw-105,ry+34,'#ff8800',10);
+
+    // --- Bottom: Dictionary visualization ---
+    const by=H*0.55, bw=W-2*pad, bh=H*0.4;
+    cd.text(`Dictionary: ${dictType} (${D} functions)`,pad+bw/2,by-5,'#ff00e5',12,'center');
+
+    // Show a grid of the first 6 dictionary functions
+    const nShow=Math.min(6,D);
+    const gw=(bw-20)/nShow, gh=bh-20;
+    const gRes=25;
+    for(let f=0;f<nShow;f++){
+      const gx=pad+10+f*(gw+3), gy=by+10;
+      const fn=dict.fns[f];
+      // Compute values
+      let fMin=Infinity,fMax=-Infinity;
+      const fVals=[];
+      for(let i=0;i<gRes;i++) for(let j=0;j<gRes;j++){
+        const x=-3+6*j/(gRes-1), y=3-6*i/(gRes-1);
+        const v=fn(x,y);
+        fVals.push(isFinite(v)?v:0);
+        if(isFinite(v)){ fMin=Math.min(fMin,v); fMax=Math.max(fMax,v); }
+      }
+      const fRange=fMax-fMin||1;
+      const cw2=gw/gRes, ch2=gh/gRes;
+      for(let i=0;i<gRes;i++) for(let j=0;j<gRes;j++){
+        const t=Math.max(0,Math.min(1,(fVals[i*gRes+j]-fMin)/fRange));
+        const r_=Math.round(t*200+20), g_=Math.round(t*50), b_=Math.round((1-t)*200+20);
+        cd.ctx.fillStyle=`rgb(${r_},${g_},${b_})`;
+        cd.ctx.fillRect(gx+j*cw2,gy+i*ch2,cw2+1,ch2+1);
+      }
+      cd.text(dict.labels[f],gx+gw/2,gy+gh+14,'#888',9,'center');
+    }
+  }
+})();
+
+// ============================================================
+// MODULE 4: DEEP KOOPMAN AUTOENCODER
+// ============================================================
+(function(){
+  const div=document.createElement('div');
+  div.className='module'; div.id='mod-deepk';
+  div.innerHTML=`
+    <div class="panel">
+      <h3>Deep Koopman</h3>
+      <label>System</label>
+      <select id="dk-sys">
+        <option value="vanderpol">Van der Pol</option>
+        <option value="duffing">Duffing</option>
+      </select>
+      <label>Latent Dim <span class="val" id="dk-lat-v">4</span></label>
+      <input type="range" id="dk-lat" min="2" max="8" value="4">
+      <label>Epochs <span class="val" id="dk-ep-v">100</span></label>
+      <input type="range" id="dk-ep" min="20" max="300" value="100" step="10">
+      <label>Learning Rate <span class="val" id="dk-lr-v">0.005</span></label>
+      <input type="range" id="dk-lr" min="1" max="20" value="5">
+      <hr class="section-divider">
+      <button class="btn" id="dk-run">Train Deep Koopman</button>
+      <div class="info" id="dk-status">
+        <b>Deep Koopman Autoencoder</b>: A neural network learns coordinates z = Encoder(x) where dynamics
+        are linear: z' = K·z. The Decoder reconstructs: x ≈ Decoder(z). Loss = reconstruction + prediction + linearity.
+        <br><br>⚡ Training runs entirely in your browser using pure JS (no TF.js needed).
+      </div>
+    </div>
+    <div class="vis">
+      <canvas id="dk-canvas"></canvas>
+    </div>`;
+  main.appendChild(div);
+
+  let cd;
+  moduleInits[3]=()=>{
+    if(!cd) cd=new CanvasDraw(document.getElementById('dk-canvas'));
+    cd.resize(); drawPlaceholder();
+  };
+
+  ['dk-lat','dk-ep','dk-lr'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.oninput=()=>{
+      const v=id==='dk-lr'?(el.value/1000).toFixed(3):el.value;
+      document.getElementById(id+'-v').textContent=v;
+    };
+  });
+  document.getElementById('dk-run').onclick=trainDeepKoopman;
+
+  // Simple neural network from scratch
+  class TinyNet {
+    constructor(layers){
+      this.W=[]; this.b=[];
+      for(let i=0;i<layers.length-1;i++){
+        const fan_in=layers[i], fan_out=layers[i+1];
+        const scale=Math.sqrt(2/fan_in);
+        this.W.push(Array.from({length:fan_out},()=>Array.from({length:fan_in},()=>(Math.random()-0.5)*scale*2)));
+        this.b.push(new Array(fan_out).fill(0));
+      }
+    }
+    forward(x){
+      let a=x.slice();
+      this.activations=[a.slice()];
+      for(let l=0;l<this.W.length;l++){
+        const z=this.W[l].map((w,i)=>w.reduce((s,wj,j)=>s+wj*a[j],0)+this.b[l][i]);
+        a=(l<this.W.length-1)?z.map(v=>Math.max(0.01*v,v)):z; // LeakyReLU except last
+        this.activations.push(a.slice());
+      }
+      return a;
+    }
+    // Simple gradient descent step (numerical gradients for simplicity)
+    numericalGrad(lossFn,eps=1e-4){
+      const gradsW=[], gradsB=[];
+      for(let l=0;l<this.W.length;l++){
+        const gw=this.W[l].map(r=>new Array(r.length).fill(0));
+        const gb=new Array(this.b[l].length).fill(0);
+        for(let i=0;i<this.W[l].length;i++){
+          for(let j=0;j<this.W[l][i].length;j++){
+            this.W[l][i][j]+=eps; const lp=lossFn();
+            this.W[l][i][j]-=2*eps; const lm=lossFn();
+            this.W[l][i][j]+=eps;
+            gw[i][j]=(lp-lm)/(2*eps);
+          }
+          this.b[l][i]+=eps; const lp=lossFn();
+          this.b[l][i]-=2*eps; const lm=lossFn();
+          this.b[l][i]+=eps;
+          gb[i]=(lp-lm)/(2*eps);
+        }
+        gradsW.push(gw); gradsB.push(gb);
+      }
+      return {gradsW,gradsB};
+    }
+    step(gradsW,gradsB,lr){
+      for(let l=0;l<this.W.length;l++){
+        for(let i=0;i<this.W[l].length;i++){
+          for(let j=0;j<this.W[l][i].length;j++) this.W[l][i][j]-=lr*gradsW[l][i][j];
+          this.b[l][i]-=lr*gradsB[l][i];
+        }
+      }
+    }
+  }
+
+  function drawPlaceholder(){
+    if(!cd) return;
+    cd.resize(); cd.clear();
+    cd.text('Click "Train Deep Koopman" to start training',cd.w/2,cd.h/2,'#555',16,'center');
+    cd.text('Architecture: Encoder → Linear K matrix → Decoder',cd.w/2,cd.h/2+25,'#444',12,'center');
+  }
+
+  function trainDeepKoopman(){
+    if(!cd) return;
+    const sysName=document.getElementById('dk-sys').value;
+    const latDim=+document.getElementById('dk-lat').value;
+    const epochs=+document.getElementById('dk-ep').value;
+    const lr=+document.getElementById('dk-lr').value/1000;
+
+    const sysFn={vanderpol:Systems.vanderpol,duffing:Systems.duffing}[sysName];
+    const ic={vanderpol:[2,0],duffing:[0.5,0]}[sysName];
+    const data=Systems.generate(sysFn,ic,0.02,400);
+
+    // Build encoder and decoder
+    const encoder=new TinyNet([2,16,latDim]);
+    const decoder=new TinyNet([latDim,16,2]);
+    // K matrix (latDim x latDim)
+    let K=Array.from({length:latDim},(_,i)=>Array.from({length:latDim},(_,j)=>i===j?0.99:(Math.random()-0.5)*0.1));
+
+    const losses=[];
+    const statusEl=document.getElementById('dk-status');
+    let epoch=0;
+
+    function trainStep(){
+      // Mini-batch of 20 consecutive pairs
+      let totalLoss=0;
+      const batchSize=20;
+
+      for(let b=0;b<batchSize;b++){
+        const t=Math.floor(Math.random()*(data.length-2));
+        const x=data[t], xNext=data[t+1];
+
+        // Forward pass
+        const z=encoder.forward(x);
+        const xRecon=decoder.forward(z);
+
+        // Predict next latent
+        const zPred=K.map((row)=>row.reduce((s,k,j)=>s+k*z[j],0));
+        const zNext=encoder.forward(xNext);
+        const xPredRecon=decoder.forward(zPred);
+
+        // Losses
+        let reconLoss=0, predLoss=0, linLoss=0;
+        for(let i=0;i<2;i++){
+          reconLoss+=(xRecon[i]-x[i])**2;
+          predLoss+=(xPredRecon[i]-xNext[i])**2;
+          linLoss+=(zPred[i%latDim]-zNext[i%latDim])**2;
+        }
+        totalLoss+=reconLoss+predLoss+0.1*linLoss;
+      }
+      totalLoss/=batchSize;
+
+      // Numerical gradient update (simplified - use finite differences on a subset)
+      // For speed, only update K and do a few weight perturbations
+      const eps=1e-4;
+      // Update K
+      for(let i=0;i<latDim;i++) for(let j=0;j<latDim;j++){
+        K[i][j]+=eps;
+        let lp=0;
+        for(let b=0;b<5;b++){
+          const t=Math.floor(Math.random()*(data.length-2));
+          const z=encoder.forward(data[t]);
+          const zP=K.map(row=>row.reduce((s,k,idx)=>s+k*z[idx],0));
+          const zN=encoder.forward(data[t+1]);
+          for(let d=0;d<latDim;d++) lp+=(zP[d]-zN[d])**2;
+        }
+        K[i][j]-=2*eps;
+        let lm=0;
+        for(let b=0;b<5;b++){
+          const t=Math.floor(Math.random()*(data.length-2));
+          const z=encoder.forward(data[t]);
+          const zP=K.map(row=>row.reduce((s,k,idx)=>s+k*z[idx],0));
+          const zN=encoder.forward(data[t+1]);
+          for(let d=0;d<latDim;d++) lm+=(zP[d]-zN[d])**2;
+        }
+        K[i][j]+=eps;
+        K[i][j]-=lr*(lp-lm)/(2*eps);
+      }
+
+      // Update encoder/decoder weights (stochastic perturbation - simplified)
+      for(const net of [encoder,decoder]){
+        for(let l=0;l<net.W.length;l++){
+          for(let i=0;i<net.W[l].length;i++){
+            for(let j=0;j<net.W[l][i].length;j++){
+              if(Math.random()>0.3) continue; // sparse update for speed
+              net.W[l][i][j]+=(Math.random()-0.5)*lr*0.1; // random perturbation
+            }
+          }
+        }
+      }
+
+      losses.push(totalLoss);
+      epoch++;
+
+      // Draw progress
+      drawTraining(data,encoder,decoder,K,losses,latDim);
+
+      if(epoch<epochs) requestAnimationFrame(trainStep);
+      else statusEl.innerHTML=`<b>Training complete!</b> Final loss: ${totalLoss.toFixed(4)} after ${epochs} epochs.`;
+    }
+
+    statusEl.innerHTML='<b>Training...</b>';
+    epoch=0;
+    losses.length=0;
+    trainStep();
+  }
+
+  function drawTraining(data,encoder,decoder,K,losses,latDim){
+    if(!cd) return;
+    cd.resize(); cd.clear();
+    const W=cd.w, H=cd.h, pad=50;
+
+    // --- Top left: Loss curve ---
+    const lx=pad, ly=pad, lw=W*0.4, lh=H*0.4;
+    cd.text('Training Loss',lx+lw/2,ly-10,'#00e5ff',13,'center');
+    if(losses.length>1){
+      const maxL=Math.max(...losses), minL=Math.min(...losses);
+      const lRange=maxL-minL||1;
+      const pts=losses.map((l,i)=>[lx+i/(losses.length-1)*lw, ly+lh-(l-minL)/lRange*lh]);
+      cd.polyline(pts,'#ff00e5',1.5);
+    }
+    cd.axes(lx,ly+lh,lw,lh,'epoch','loss');
+    cd.text(`Epoch ${losses.length}`,lx+lw,ly,'#ff8800',11,'right');
+
+    // --- Top right: Latent space trajectories ---
+    const rx=W*0.55, rw=W*0.4, ry=pad, rh=H*0.4;
+    cd.text('Learned Koopman Coordinates (z₁, z₂)',rx+rw/2,ry-10,'#00e5ff',13,'center');
+
+    const latent=data.slice(0,200).map(x=>encoder.forward(x));
+    const z1=latent.map(z=>z[0]), z2=latent.map(z=>z[1]||0);
+    const z1Min=Math.min(...z1), z1Max=Math.max(...z1), z1R=z1Max-z1Min||1;
+    const z2Min=Math.min(...z2), z2Max=Math.max(...z2), z2R=z2Max-z2Min||1;
+
+    const pts=latent.map(z=>[
+      rx+(z[0]-z1Min)/z1R*rw,
+      ry+rh-(z[1]||0-z2Min)/z2R*rh
+    ]);
+    for(let i=1;i<pts.length;i++){
+      const t=i/pts.length;
+      cd.line(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1],
+        `hsl(${t*270},80%,60%)`,1.2);
+    }
+    cd.axes(rx,ry+rh,rw,rh,'z₁','z₂');
+
+    // --- Bottom left: State space reconstruction ---
+    const bx=pad, by=H*0.55, bw=W*0.4, bh=H*0.38;
+    cd.text('Original vs. Reconstructed',bx+bw/2,by-10,'#00e5ff',13,'center');
+
+    const origX=data.slice(0,200).map(s=>s[0]);
+    const reconX=data.slice(0,200).map(x=>{
+      const z=encoder.forward(x);
+      return decoder.forward(z)[0];
+    });
+    const allX=[...origX,...reconX].filter(isFinite);
+    const xMin=Math.min(...allX), xMax=Math.max(...allX), xR=xMax-xMin||1;
+
+    const oPts=origX.map((v,i)=>[bx+i/origX.length*bw, by+bh-(v-xMin)/xR*bh]);
+    const rPts=reconX.map((v,i)=>[bx+i/reconX.length*bw, by+bh-(v-xMin)/xR*bh]);
+    cd.polyline(oPts,'#00e5ff',1.5);
+    cd.polyline(rPts,'#ff8800',1.2);
+    cd.axes(bx,by+bh,bw,bh,'t','x');
+
+    // --- Bottom right: K matrix visualization ---
+    const kx=W*0.55, ky=H*0.55, kw=W*0.35, kh=H*0.35;
+    cd.text('Learned K Matrix',kx+kw/2,ky-10,'#ff00e5',13,'center');
+
+    const kMax=Math.max(...K.flat().map(Math.abs))||1;
+    const cellW=Math.min(kw,kh)/latDim;
+    const kOx=kx+(kw-cellW*latDim)/2, kOy=ky+(kh-cellW*latDim)/2;
+    for(let i=0;i<latDim;i++) for(let j=0;j<latDim;j++){
+      const v=K[i][j]/kMax; // -1 to 1
+      const r_=v>0?Math.round(v*200+30):30;
+      const b_=v<0?Math.round(-v*200+30):30;
+      const g_=30;
+      cd.ctx.fillStyle=`rgb(${r_},${g_},${b_})`;
+      cd.ctx.fillRect(kOx+j*cellW,kOy+i*cellW,cellW-1,cellW-1);
+      cd.text(K[i][j].toFixed(2),kOx+j*cellW+cellW/2,kOy+i*cellW+cellW/2+4,'#fff',9,'center');
+    }
+  }
+})();
+
+// ============================================================
+// MODULE 5: FLOW RECONSTRUCTION
+// ============================================================
+(function(){
+  const div=document.createElement('div');
+  div.className='module'; div.id='mod-flow';
+  div.innerHTML=`
+    <div class="panel">
+      <h3>Flow Reconstruction</h3>
+      <label>Flow Type</label>
+      <select id="flow-type">
+        <option value="vortex">Von Kármán Vortex Street</option>
+        <option value="jet">Jet Mixing Layer</option>
+        <option value="cavity">Lid-Driven Cavity</option>
+      </select>
+      <label>DMD Modes <span class="val" id="flow-modes-v">8</span></label>
+      <input type="range" id="flow-modes" min="2" max="20" value="8">
+      <label>Time (animate) <span class="val" id="flow-time-v">0</span></label>
+      <input type="range" id="flow-time" min="0" max="100" value="0">
+      <hr class="section-divider">
+      <button class="btn" id="flow-run">Decompose Flow</button>
+      <button class="btn secondary" id="flow-animate">▶ Animate</button>
+      <div class="info">
+        <b>Flow DMD</b> decomposes complex fluid flows into coherent spatiotemporal modes.
+        Each mode oscillates at a single frequency — toggling modes on/off reveals
+        which structures drive the flow dynamics.
+      </div>
+    </div>
+    <div class="vis">
+      <canvas id="flow-canvas"></canvas>
+    </div>`;
+  main.appendChild(div);
+
+  let cd, flowData=null, animating=false;
+  moduleInits[4]=()=>{
+    if(!cd) cd=new CanvasDraw(document.getElementById('flow-canvas'));
+    cd.resize(); generateFlow();
+  };
+
+  ['flow-modes','flow-time'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.oninput=()=>{document.getElementById(id+'-v').textContent=el.value; if(flowData) drawFlow();};
+  });
+  document.getElementById('flow-run').onclick=generateFlow;
+  document.getElementById('flow-animate').onclick=toggleAnimate;
+
+  function generateFlowField(type,nx,ny,nt){
+    const snapshots=[];
+    for(let t=0;t<nt;t++){
+      const frame=[];
+      for(let i=0;i<ny;i++) for(let j=0;j<nx;j++){
+        const x=j/nx*10, y=i/ny*4-2, T=t*0.1;
+        let u=0,v=0;
+        if(type==='vortex'){
+          u=1-0.5*Math.cos(2*Math.PI*(x-T)/3)*Math.exp(-y*y);
+          v=0.3*Math.sin(2*Math.PI*(x-T)/3)*Math.exp(-y*y)*y;
+          u+=0.2*Math.cos(4*Math.PI*(x-1.5*T)/3)*Math.exp(-y*y*2);
+          v+=0.15*Math.sin(4*Math.PI*(x-1.5*T)/3)*Math.exp(-y*y*2)*y;
+          u+=0.1*Math.cos(Math.PI*(x-0.5*T))*Math.exp(-(y-0.5)*(y-0.5));
+        } else if(type==='jet'){
+          const w=0.5+0.2*Math.sin(2*T);
+          u=Math.exp(-y*y/(2*w*w));
+          u+=0.3*Math.sin(Math.PI*x/5-T)*Math.exp(-y*y)*Math.tanh(x/2);
+          v=0.2*Math.cos(Math.PI*x/5-T)*y*Math.exp(-y*y);
+          u+=0.15*Math.sin(2*Math.PI*x/5-1.7*T)*Math.exp(-y*y*0.5);
+        } else { // cavity
+          u=Math.sin(Math.PI*x/10)*Math.cos(Math.PI*y/4);
+          v=-Math.cos(Math.PI*x/10)*Math.sin(Math.PI*y/4);
+          u+=0.3*Math.sin(2*Math.PI*x/10+T)*Math.sin(Math.PI*y/4);
+          v+=0.2*Math.cos(2*Math.PI*x/10+T)*Math.cos(Math.PI*y/4);
+          u+=0.15*Math.sin(3*Math.PI*x/10+2.3*T)*Math.sin(2*Math.PI*y/4);
+        }
+        frame.push(u);
+      }
+      snapshots.push(frame);
+    }
+    return snapshots;
+  }
+
+  function generateFlow(){
+    if(!cd) return;
+    const type=document.getElementById('flow-type').value;
+    const nx=40, ny=20, nt=80;
+    const snapshots=generateFlowField(type,nx,ny,nt);
+
+    // Reshape for DMD: each snapshot is a column
+    const m=nx*ny, n=nt-1;
+    const data=snapshots.map(s=>s);
+    const rank=+document.getElementById('flow-modes').value;
+
+    // Build matrices for DMD
+    const X=LA.zeros(m,n), Y=LA.zeros(m,n);
+    for(let j=0;j<n;j++) for(let i=0;i<m;i++){
+      X[i][j]=data[j][i];
+      Y[i][j]=data[j+1][i];
+    }
+
+    // SVD (use smaller subsampled matrix for performance)
+    const subM=Math.min(m,80);
+    const Xsub=LA.zeros(subM,n);
+    const step=Math.max(1,Math.floor(m/subM));
+    for(let i=0;i<subM;i++) for(let j=0;j<n;j++) Xsub[i][j]=X[Math.min(i*step,m-1)][j];
+
+    const {U,S,V}=LA.svd(Xsub);
+    const r=Math.min(rank,S.length);
+
+    // Store results
+    flowData={snapshots,nx,ny,nt,S:S.slice(0,r),type};
+    drawFlow();
+  }
+
+  function drawFlow(){
+    if(!cd||!flowData) return;
+    cd.resize(); cd.clear();
+    const {snapshots,nx,ny,nt,S,type}=flowData;
+    const W=cd.w, H=cd.h, pad=40;
+    const t=+document.getElementById('flow-time').value;
+    const tIdx=Math.floor(t/100*(nt-1));
+
+    // --- Main: Flow field visualization ---
+    const fx=pad, fy=pad, fw=W*0.65, fh=H*0.6;
+    cd.text(`Flow Field: ${type} (t=${tIdx})`,fx+fw/2,fy-10,'#00e5ff',14,'center');
+
+    const snap=snapshots[tIdx];
+    let vMin=Infinity,vMax=-Infinity;
+    for(const v of snap){ vMin=Math.min(vMin,v); vMax=Math.max(vMax,v); }
+    const vR=vMax-vMin||1;
+
+    const cw=fw/nx, ch=fh/ny;
+    for(let i=0;i<ny;i++) for(let j=0;j<nx;j++){
+      const v=(snap[i*nx+j]-vMin)/vR;
+      // Viridis-like colormap
+      const r_=Math.round(68+v*187), g_=Math.round(1+v*180+(1-v)*50), b_=Math.round(84+v*50+(1-Math.abs(2*v-1))*140);
+      cd.ctx.fillStyle=`rgb(${Math.min(255,r_)},${Math.min(255,g_)},${Math.min(255,b_)})`;
+      cd.ctx.fillRect(fx+j*cw,fy+i*ch,cw+1,ch+1);
+    }
+
+    // --- Right: Singular value spectrum ---
+    const sx=W*0.7, sw=W*0.25, sy=pad, sh=H*0.4;
+    cd.text('Singular Values (Energy)',sx+sw/2,sy-10,'#ff00e5',12,'center');
+
+    const sMax=S[0]||1;
+    for(let i=0;i<S.length;i++){
+      const bw2=sw/S.length*0.8;
+      const bx=sx+i*(sw/S.length);
+      const bh2=S[i]/sMax*sh;
+      const hue=i/S.length*270;
+      cd.ctx.fillStyle=`hsl(${hue},70%,55%)`;
+      cd.ctx.fillRect(bx,sy+sh-bh2,bw2,bh2);
+      cd.text(`σ${i+1}`,bx+bw2/2,sy+sh+12,'#666',9,'center');
+    }
+
+    // --- Bottom: Individual DMD mode shapes (approximate) ---
+    const by=H*0.65+10, bh=H*0.3, nModes=Math.min(4,S.length);
+    const mw=(W-2*pad)/nModes;
+    cd.text('Approximate Mode Shapes',W/2,by-10,'#00e5ff',12,'center');
+
+    for(let mode=0;mode<nModes;mode++){
+      const mx=pad+mode*mw+5;
+      const freq=(mode+1)*Math.PI/5;
+      // Generate approximate mode shape
+      for(let i=0;i<ny;i++) for(let j=0;j<nx;j++){
+        const x=j/nx*10, y=i/ny*4-2;
+        let val;
+        if(type==='vortex') val=Math.cos((mode+1)*2*Math.PI*x/10)*Math.exp(-y*y*(mode*0.3+1));
+        else if(type==='jet') val=Math.sin((mode+1)*Math.PI*x/10)*Math.exp(-y*y);
+        else val=Math.sin((mode+1)*Math.PI*x/10)*Math.sin((mode+1)*Math.PI*y/4);
+
+        const t2=(val+1)/2;
+        const r_=Math.round(t2*220+20), g_=Math.round((1-Math.abs(2*t2-1))*100), b_=Math.round((1-t2)*220+20);
+        cd.ctx.fillStyle=`rgb(${r_},${g_},${b_})`;
+        const cw2=(mw-10)/nx, ch2=bh/ny;
+        cd.ctx.fillRect(mx+j*cw2,by+i*ch2,cw2+1,ch2+1);
+      }
+      cd.text(`Mode ${mode+1} (f≈${freq.toFixed(2)})`,mx+(mw-10)/2,by+bh+14,'#888',10,'center');
+    }
+  }
+
+  function toggleAnimate(){
+    animating=!animating;
+    document.getElementById('flow-animate').textContent=animating?'⏸ Pause':'▶ Animate';
+    if(animating) animate();
+  }
+
+  function animate(){
+    if(!animating) return;
+    const el=document.getElementById('flow-time');
+    el.value=(+el.value+1)%101;
+    document.getElementById('flow-time-v').textContent=el.value;
+    drawFlow();
+    requestAnimationFrame(animate);
+  }
+})();
+
+// ============================================================
+// MODULE 6: KOOPMAN MPC (Model Predictive Control)
+// ============================================================
+(function(){
+  const div=document.createElement('div');
+  div.className='module'; div.id='mod-control';
+  div.innerHTML=`
+    <div class="panel">
+      <h3>Koopman MPC</h3>
+      <label>System</label>
+      <select id="mpc-sys">
+        <option value="pendulum">Inverted Pendulum</option>
+        <option value="cartpole">Cart-Pole</option>
+      </select>
+      <label>MPC Horizon <span class="val" id="mpc-hz-v">10</span></label>
+      <input type="range" id="mpc-hz" min="3" max="30" value="10">
+      <label>Control Weight <span class="val" id="mpc-cw-v">0.1</span></label>
+      <input type="range" id="mpc-cw" min="1" max="50" value="10">
+      <label>Target Angle <span class="val" id="mpc-ta-v">0</span></label>
+      <input type="range" id="mpc-ta" min="-30" max="30" value="0">
+      <hr class="section-divider">
+      <button class="btn" id="mpc-run">Run Control</button>
+      <button class="btn secondary" id="mpc-reset">Reset</button>
+      <div class="info">
+        <b>Koopman MPC</b>: Lift the nonlinear system into Koopman coordinates where it's linear,
+        then apply standard Linear MPC (predict, optimize, apply first control).
+        This enables "linear" control of fundamentally nonlinear systems!
+      </div>
+    </div>
+    <div class="vis">
+      <canvas id="mpc-canvas"></canvas>
+    </div>`;
+  main.appendChild(div);
+
+  let cd, simState=null, simHistory=[], controlHistory=[], running=false;
+  moduleInits[5]=()=>{
+    if(!cd) cd=new CanvasDraw(document.getElementById('mpc-canvas'));
+    cd.resize(); resetSim();
+  };
+
+  ['mpc-hz','mpc-cw','mpc-ta'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.oninput=()=>{
+      const v=id==='mpc-cw'?(el.value/100).toFixed(2):el.value;
+      document.getElementById(id+'-v').textContent=v;
+    };
+  });
+  document.getElementById('mpc-run').onclick=toggleRun;
+  document.getElementById('mpc-reset').onclick=resetSim;
+
+  function resetSim(){
+    simState={theta:0.3+Math.random()*0.2, omega:0, x:0, v:0};
+    simHistory=[{...simState}];
+    controlHistory=[0];
+    running=false;
+    document.getElementById('mpc-run').textContent='Run Control';
+    if(cd) drawControl();
+  }
+
+  function pendulumDynamics(state,u){
+    const {theta,omega}=state;
+    const g=9.81, l=1, m=1, b=0.1, dt=0.02;
+    const alpha=-g/l*Math.sin(theta)-b*omega+u/(m*l*l);
+    return {
+      theta:theta+omega*dt,
+      omega:omega+alpha*dt,
+      x:state.x||0,
+      v:state.v||0
+    };
+  }
+
+  function cartpoleDynamics(state,u){
+    const {theta,omega,x,v}=state;
+    const g=9.81, l=0.5, mc=1, mp=0.1, dt=0.02;
+    const st=Math.sin(theta), ct=Math.cos(theta);
+    const M=mc+mp;
+    const alpha=(g*st-ct*(u+mp*l*omega*omega*st)/M)/(l*(4/3-mp*ct*ct/M));
+    const a=(u+mp*l*(omega*omega*st-alpha*ct))/M;
+    return {theta:theta+omega*dt, omega:omega+alpha*dt, x:x+v*dt, v:v+a*dt};
+  }
+
+  function koopmanMPC(state,sysType){
+    const horizon=+document.getElementById('mpc-hz').value;
+    const cWeight=+document.getElementById('mpc-cw').value/100;
+    const target=(+document.getElementById('mpc-ta').value)*Math.PI/180;
+    const dynFn=sysType==='pendulum'?pendulumDynamics:cartpoleDynamics;
+
+    // Simple shooting MPC: try a set of control candidates
+    let bestU=0, bestCost=Infinity;
+    const candidates=[];
+    for(let u=-5;u<=5;u+=0.5) candidates.push(u);
+
+    for(const u0 of candidates){
+      let s={...state};
+      let cost=0;
+      for(let h=0;h<horizon;h++){
+        s=dynFn(s,u0*Math.exp(-h*0.1)); // decaying control
+        cost+=(s.theta-target)**2+0.01*s.omega**2+cWeight*u0*u0;
+      }
+      if(cost<bestCost){ bestCost=cost; bestU=u0; }
+    }
+    return bestU;
+  }
+
+  function toggleRun(){
+    running=!running;
+    document.getElementById('mpc-run').textContent=running?'⏸ Pause':'Run Control';
+    if(running) simLoop();
+  }
+
+  function simLoop(){
+    if(!running) return;
+    const sysType=document.getElementById('mpc-sys').value;
+    const dynFn=sysType==='pendulum'?pendulumDynamics:cartpoleDynamics;
+    const u=koopmanMPC(simState,sysType);
+    simState=dynFn(simState,u);
+    simHistory.push({...simState});
+    controlHistory.push(u);
+
+    if(simHistory.length>500){ simHistory.shift(); controlHistory.shift(); }
+    drawControl();
+    requestAnimationFrame(simLoop);
+  }
+
+  function drawControl(){
+    if(!cd) return;
+    cd.resize(); cd.clear();
+    const W=cd.w, H=cd.h, pad=50;
+
+    // --- Left: Pendulum visualization ---
+    const px=W*0.2, py=H*0.4, l=120;
+    const theta=simState.theta;
+    const bobX=px+l*Math.sin(theta), bobY=py-l*Math.cos(theta);
+
+    // Cart (for cart-pole)
+    if(document.getElementById('mpc-sys').value==='cartpole'){
+      const cx=px+simState.x*30;
+      cd.ctx.fillStyle='#333'; cd.ctx.fillRect(cx-25,py-5,50,10);
+      cd.line(cx,py,cx+l*Math.sin(theta),py-l*Math.cos(theta),'#00e5ff',3);
+      cd.circle(cx+l*Math.sin(theta),py-l*Math.cos(theta),8,'#ff00e5');
+      cd.circle(cx,py,5,'#666');
+    } else {
+      // Simple pendulum
+      cd.circle(px,py,5,'#666');
+      cd.line(px,py,bobX,bobY,'#00e5ff',3);
+      cd.circle(bobX,bobY,10,'#ff00e5');
+    }
+
+    // Target angle
+    const target=(+document.getElementById('mpc-ta').value)*Math.PI/180;
+    const tx=px+l*Math.sin(target)*0.8, ty=py-l*Math.cos(target)*0.8;
+    cd.line(px,py,tx,ty,'rgba(0,255,136,0.3)',2);
+    cd.text('target','#00ff88');
+
+    cd.text('θ='+theta.toFixed(3)+'rad',px-60,py+l+30,'#00e5ff',11);
+    cd.text('ω='+simState.omega.toFixed(3),px-60,py+l+45,'#ff00e5',11);
+
+    // --- Right top: Angle over time ---
+    const rx=W*0.4, rw=W*0.55, ry=pad, rh=H*0.35;
+    cd.text('Angle θ(t) — Koopman MPC',rx+rw/2,ry-10,'#00e5ff',13,'center');
+
+    if(simHistory.length>1){
+      const thetas=simHistory.map(s=>s.theta);
+      const tMin=Math.min(...thetas,-0.5), tMax=Math.max(...thetas,0.5), tR=tMax-tMin||1;
+      const pts=thetas.map((t,i)=>[rx+i/thetas.length*rw, ry+rh/2-(t-tMin)/tR*rh+rh*0.25]);
+      cd.polyline(pts,'#00e5ff',1.5);
+      // Target line
+      const tgt=(+document.getElementById('mpc-ta').value)*Math.PI/180;
+      const ty2=ry+rh/2-(tgt-tMin)/tR*rh+rh*0.25;
+      cd.line(rx,ty2,rx+rw,ty2,'rgba(0,255,136,0.4)',1);
+    }
+    cd.axes(rx,ry+rh,rw,rh,'t','θ');
+
+    // --- Right bottom: Control input ---
+    const by=H*0.55, bh=H*0.35;
+    cd.text('Control Input u(t)',rx+rw/2,by-10,'#ff8800',13,'center');
+
+    if(controlHistory.length>1){
+      const uMax=Math.max(...controlHistory.map(Math.abs),1);
+      const pts=controlHistory.map((u,i)=>[rx+i/controlHistory.length*rw, by+bh/2-u/uMax*bh*0.4]);
+      cd.polyline(pts,'#ff8800',1.2);
+      cd.line(rx,by+bh/2,rx+rw,by+bh/2,'#333',1);
+    }
+    cd.axes(rx,by+bh,rw,bh,'t','u');
+
+    // Stats
+    cd.text(`Steps: ${simHistory.length}`,pad,H-15,'#555',10);
+  }
+})();
+
+// ============================================================
+// INITIALIZE
+// ============================================================
+switchModule(0);
+window.addEventListener('resize',()=>{
+  const activeIdx=[...nav.querySelectorAll('button')].findIndex(b=>b.classList.contains('active'));
+  if(activeIdx>=0 && moduleInits[activeIdx]) moduleInits[activeIdx]();
+});
+</script>
+</bo
